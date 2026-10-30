@@ -29,6 +29,7 @@ struct ezhle_fds_image {
     uint8_t sides;
     size_t file_count_offset;
     size_t first_side_count;
+size_t first_side_base;
     int has_file_count;
 };
 
@@ -184,6 +185,7 @@ ezhle_fds_image *ezhle_fds_image_open(const uint8_t *data, size_t len, int *err)
     memcpy(d->data, data, len);
     d->len = len;
     d->sides = sides;
+    d->first_side_base = offset;
 
     for (s = 0; s < sides; s++) {
         size_t base = offset + (size_t)s * FDS_SIDE_BYTES;
@@ -282,6 +284,18 @@ const ezhle_fds_image_file *ezhle_fds_image_find(const ezhle_fds_image *disk, ui
 uint8_t ezhle_fds_image_boot_read_code(const ezhle_fds_image *disk)
 {
     return disk == NULL ? 0xFF : disk->boot_code;
+}
+
+int ezhle_fds_image_first_side_disk_id(const ezhle_fds_image *disk, uint8_t out[10])
+{
+    if (disk == NULL || out == NULL) {
+        return -1;
+    }
+    if (disk->first_side_base + FDS_DISK_INFO_BYTES > disk->len) {
+        return -1;
+    }
+    memcpy(out, disk->data + disk->first_side_base + 0x0Fu, 10u);
+    return 0;
 }
 
 uint8_t ezhle_fds_image_side_count(const ezhle_fds_image *disk)
