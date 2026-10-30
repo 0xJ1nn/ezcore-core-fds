@@ -28,6 +28,7 @@ static fds_state_t *fds_state(ezhle_core_t *core)
 /* Forward declarations. */
 int ezhle_fds_attach_disk(ezhle_core_t *core, const uint8_t *data, size_t len);
 void ezhle_fds_detach_disk(ezhle_core_t *core);
+int ezhle_fds_image_set_file_count(ezhle_fds_image *disk, size_t count);
 
 /* ---- bus helpers (8-bit, bounds-checked by the core) ---- */
 
@@ -175,6 +176,57 @@ static int32_t fds_nam2pixel(ezhle_core_t *core, ezhle_regs_t *regs)
     return 0;
 }
 
+/* ---- file-count services (FDS-106) ---- */
+
+static ezhle_fds_image *fds_attached_disk(ezhle_core_t *core)
+{
+    fds_state_t *st = fds_state(core);
+    return st == NULL ? NULL : st->disk;
+}
+
+/* $E484 GetNumFiles: copy the attached image's file count to zero-page $06.
+ * Source: https://www.nesdev.org/wiki/FDS_BIOS */
+static int32_t fds_get_num_files(ezhle_core_t *core, ezhle_regs_t *regs)
+{
+    ezhle_fds_image *disk = fds_attached_disk(core);
+    size_t count;
+
+    if (disk == NULL) {
+        ezhle_set_error(core, "GetNumFiles: no disk");
+        fds_log(core, "GetNumFiles: no disk");
+        regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+        return EZHLE_ERR_UNIMPL;
+    }
+    count = ezhle_fds_image_first_side_file_count(disk);
+    if (count > 0xFFu) {
+        return EZHLE_ERR_FAULT;
+    }
+    if (fds_write8(core, 0x0006u, (uint8_t)count) != EZHLE_OK) {
+        return EZHLE_ERR_FAULT;
+    }
+    regs->r[EZHLE_FDS_REG_A] = 0u;
+    return 0;
+}
+
+/* $E492 SetNumFiles: A = new file count, written to the attached image.
+ * Source: https://www.nesdev.org/wiki/FDS_BIOS */
+static int32_t fds_set_num_files(ezhle_core_t *core, ezhle_regs_t *regs)
+{
+    ezhle_fds_image *disk = fds_attached_disk(core);
+
+    if (disk == NULL) {
+        ezhle_set_error(core, "SetNumFiles: no disk");
+        fds_log(core, "SetNumFiles: no disk");
+        regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+        return EZHLE_ERR_UNIMPL;
+    }
+    if (ezhle_fds_image_set_file_count(disk, (size_t)regs->r[EZHLE_FDS_REG_A]) != 0) {
+        return EZHLE_ERR_STATE;
+    }
+    regs->r[EZHLE_FDS_REG_A] = 0u;
+    return 0;
+}
+
 /* ---- entry-point table ---- */
 
 static const ezhle_fds_entry_t FDS_ENTRIES[] = {
@@ -200,8 +252,8 @@ static const ezhle_fds_entry_t FDS_ENTRIES[] = {
     { 0xE305u, "SetFileCount", 0 },
     { 0xE32Au, "GetDiskInfo", 0 },
     { 0xE445u, "CheckDiskHeader", 0 },
-    { 0xE484u, "GetNumFiles", 0 },
-    { 0xE492u, "SetNumFiles", 0 },
+    { 0xE484u, "GetNumFiles", 1 },
+    { 0xE492u, "SetNumFiles", 1 },
     { 0xE4A0u, "FileMatchTest", 0 },
     { 0xE4DAu, "SkipFiles", 0 },
     { 0xE7BBu, "VRAMStructWrite", 0 },
@@ -306,6 +358,12 @@ static int fds_dispatch(ezhle_core_t *core, ezhle_regs_t *regs)
         case 0xE997u:
             ret = fds_nam2pixel(core, regs);
             break;
+        case 0xE484u:
+            ret = fds_get_num_files(core, regs);
+            break;
+        case 0xE492u:
+            ret = fds_set_num_files(core, regs);
+            break;
         default:
             ret = EZHLE_ERR_UNIMPL;
             break;
@@ -313,6 +371,10 @@ static int fds_dispatch(ezhle_core_t *core, ezhle_regs_t *regs)
     }
 
     if (ret == EZHLE_ERR_UNIMPL) {
+        if (info->implemented) {
+            regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+            return EZHLE_ERR_UNIMPL;
+        }
         (void)snprintf(msg, sizeof(msg),
                        "unimplemented FDS entry %s ($%04" PRIx16 ")",
                        info->name, entry);
