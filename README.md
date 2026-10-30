@@ -25,6 +25,7 @@ SHA256SUMS                         every shipped byte, pinned
 ```bash
 make test       # unit tests for entry table and image parser
 make test-cxx   # C++17 consumer includes public headers and links the C ABI
+make fuzz       # synthetic corpus + 20k random inputs against the parser
 make asan       # ASan/UBSan
 make all        # build lib/libezhle.a
 sh scripts/check_clean.sh   # no ROM/BIOS/keys/binary/internal markers
