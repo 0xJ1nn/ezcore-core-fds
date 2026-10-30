@@ -1,7 +1,7 @@
 {
   "id": "ezhle-fds",
   "name": "ezCORE HLE \u2014 Famicom Disk System",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "license": "BSD-2-Clause",
   "system": "fds",
   "kind": "hle-library",
@@ -10,5 +10,5 @@
   "provides": [
     "bios-hle"
   ],
-  "notes": "Adds GetNumFiles/SetNumFiles over the attached image. Library, 5/36 entry points; no BIOS/ROM."
+  "notes": "FDS-only source; C11 C ABI with C++17 consumer smoke; clean-room check and CI; 5/36 entry points; no BIOS/ROM; no game boot claim."
 }

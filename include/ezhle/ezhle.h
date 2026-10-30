@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * ABI version of ezhle_desc_t. Bump on ANY layout change (size or field order).
  *   1 = original 24-byte descriptor (system, build_id, bus pointers).
@@ -184,5 +188,9 @@ int ezhle_exited(const ezhle_core_t *core);
 int32_t ezhle_exit_code(const ezhle_core_t *core);
 const char *ezhle_last_error(const ezhle_core_t *core);
 const char *ezhle_system(const ezhle_core_t *core);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
