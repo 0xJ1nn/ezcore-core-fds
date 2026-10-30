@@ -1,0 +1,10 @@
+988f04bbb186d1079fc7a6c2e5deccbf8079ead022e1fc086e5437f25fdaefe5  ./LICENSE
+a929f8cfc864213ca6e91fe6c784717afb6f513fbfdf91b8bb832673b61b9259  ./NOTICE
+009ac29385d8f1115ecfa2d9ae4040aeee3b6c412e90b90587e18fc6b2e240dc  ./README.md
+418c46e6ef1a260375a7c4f7e7fdc7ef6dd5cef587eaa4b9bc4c4105a773908b  ./include/ezhle/ezhle.h
+1afc4590f250010e75417ae3ff4e1e50e169815449caea2ed04886a8b70fc9ca  ./include/ezhle/ezhle_fds.h
+ae02434e0343f37af1402f5032e42909bfcbb88a8815e6728e1351f0a8b23cf6  ./include/ezhle/ezhle_fds_image.h
+c5489e8cea361d4ce064d28d1230feb8a9d54e341ee076cd7ebb3d9d48989eef  ./include/ezhle/ezhle_ps2.h
+c73f31b1bbbff4243deced523993f97a75a34c0d2659ca443e210506c605841d  ./install.sh
+cb8f8bb043beecf4d56724c8bda17cbc66c235f6b83d847017bb9d4c0c72b1db  ./lib/libezhle.a
+e538be1bd4a2f2b51232dde95c79e7e588a493f7dc52b2f316e7008b71f411ea  ./manifest.json

@@ -1,0 +1,12 @@
+{
+  "id": "ezhle-fds",
+  "name": "ezCORE HLE — Famicom Disk System",
+  "version": "0.1.0",
+  "license": "BSD-2-Clause",
+  "system": "fds",
+  "kind": "hle-library",
+  "abi": "ezhle-2",
+  "status": "lab",
+  "provides": ["bios-hle"],
+  "notes": "Scaffold. No compatibility claim."
+}

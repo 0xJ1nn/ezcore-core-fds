@@ -1,0 +1,20 @@
+ezCORE Core — FDS HLE
+Copyright (c) 2026 ezCORE contributors. BSD-2-Clause.
+
+This package is a clean-room high-level implementation of documented Famicom
+Disk System BIOS behaviour. It contains no Nintendo firmware, BIOS image, ROM,
+key, or disassembly.
+
+Documentation sources:
+  https://www.nesdev.org/wiki/FDS_BIOS
+  https://www.nesdev.org/wiki/FDS_file_format
+  https://www.nesdev.org/wiki/FDS_disk_format
+
+NESdev wiki text is used as a specification reference only. No wiki text is
+copied into this package. Famicom, Famicom Disk System and Nintendo are
+trademarks of Nintendo; this project is not affiliated with or endorsed by
+Nintendo.
+
+The package is provided "as is", without warranty of any kind. It is a library
+for emulator cores, not a complete emulator, and it makes no compatibility
+claim for any commercial title.
