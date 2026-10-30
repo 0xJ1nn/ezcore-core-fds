@@ -5,7 +5,7 @@ Source of truth: the table in `fds_hle.c` (36 rows). No entries invented.
 Public documentation used: NESdev wiki FDS BIOS page (see Citation).
 Status values: `implemented`, `unimpl`, `unknown`.
 
-Counts: 3 implemented, 29 unimpl, 4 unknown. Total 36.
+Counts: 5 implemented, 27 unimpl, 4 unknown. Total 36.
 
 | Address | Name | Status | Behaviour implemented | Citation | Test |
 |---|---|---|---|---|---|
@@ -31,8 +31,8 @@ Counts: 3 implemented, 29 unimpl, 4 unknown. Total 36.
 | 0xE305 | SetFileCount | unimpl | none (returns EZHLE_ERR_UNIMPL) | https://www.nesdev.org/wiki/FDS_BIOS | none |
 | 0xE32A | GetDiskInfo | unimpl | none (returns EZHLE_ERR_UNIMPL) | https://www.nesdev.org/wiki/FDS_BIOS | none |
 | 0xE445 | CheckDiskHeader | unimpl | none (returns EZHLE_ERR_UNIMPL) | https://www.nesdev.org/wiki/FDS_BIOS | none |
-| 0xE484 | GetNumFiles | unimpl | none (returns EZHLE_ERR_UNIMPL) | https://www.nesdev.org/wiki/FDS_BIOS | none |
-| 0xE492 | SetNumFiles | unimpl | none (returns EZHLE_ERR_UNIMPL) | https://www.nesdev.org/wiki/FDS_BIOS | none |
+| 0xE484 | GetNumFiles | implemented | writes attached image's first-side file count to $06; no disk -> UNIMPL + log | https://www.nesdev.org/wiki/FDS_BIOS | test_get_num_files |
+| 0xE492 | SetNumFiles | implemented | writes A to the attached image's file count; no disk -> UNIMPL + log | https://www.nesdev.org/wiki/FDS_BIOS | test_set_num_files_roundtrip |
 | 0xE4A0 | FileMatchTest | unimpl | none (returns EZHLE_ERR_UNIMPL) | https://www.nesdev.org/wiki/FDS_BIOS | none |
 | 0xE4DA | SkipFiles | unimpl | none (returns EZHLE_ERR_UNIMPL) | https://www.nesdev.org/wiki/FDS_BIOS | none |
 | 0xE7BB | VRAMStructWrite | unimpl | none (returns EZHLE_ERR_UNIMPL) | https://www.nesdev.org/wiki/FDS_BIOS | none |

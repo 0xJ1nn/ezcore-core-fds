@@ -27,6 +27,9 @@ struct ezhle_fds_image {
     uint8_t boot_code;
     uint8_t boot_set;
     uint8_t sides;
+    size_t file_count_offset;
+    size_t first_side_count;
+    int has_file_count;
 };
 
 static uint16_t rd16(const uint8_t *p)
@@ -82,6 +85,11 @@ static int parse_side(ezhle_fds_image *d, size_t base, size_t side_len)
         return EZHLE_FDS_IMAGE_E_FORMAT;
     }
     file_count = d->data[pos + 1];
+    if (!d->has_file_count) {
+        d->file_count_offset = pos + 1u;
+        d->first_side_count = file_count;
+        d->has_file_count = 1;
+    }
     pos += 2u;
 
     for (i = 0; i < file_count; i++) {
@@ -221,6 +229,24 @@ void ezhle_fds_image_close(ezhle_fds_image *disk)
 size_t ezhle_fds_image_file_count(const ezhle_fds_image *disk)
 {
     return disk == NULL ? 0 : disk->count;
+}
+
+int ezhle_fds_image_set_file_count(ezhle_fds_image *disk, size_t count)
+{
+    if (disk == NULL || count > FDS_MAX_FILES) {
+        return -1;
+    }
+    disk->count = count;
+    disk->first_side_count = count;
+    if (disk->has_file_count && disk->file_count_offset < disk->len) {
+        disk->data[disk->file_count_offset] = (uint8_t)count;
+    }
+    return 0;
+}
+
+size_t ezhle_fds_image_first_side_file_count(const ezhle_fds_image *disk)
+{
+    return disk == NULL ? 0 : disk->first_side_count;
 }
 
 const ezhle_fds_image_file *ezhle_fds_image_file_at(const ezhle_fds_image *disk, size_t index)

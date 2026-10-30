@@ -42,6 +42,7 @@ ezhle_fds_image *ezhle_fds_image_open(const uint8_t *data, size_t len, int *err)
 void ezhle_fds_image_close(ezhle_fds_image *disk);
 
 size_t ezhle_fds_image_file_count(const ezhle_fds_image *disk);
+size_t ezhle_fds_image_first_side_file_count(const ezhle_fds_image *disk);
 const ezhle_fds_image_file *ezhle_fds_image_file_at(const ezhle_fds_image *disk, size_t index);
 const uint8_t *ezhle_fds_image_file_data(const ezhle_fds_image *disk, const ezhle_fds_image_file *file);
 const ezhle_fds_image_file *ezhle_fds_image_find(const ezhle_fds_image *disk, uint8_t id);

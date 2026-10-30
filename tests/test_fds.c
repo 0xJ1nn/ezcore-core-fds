@@ -582,6 +582,527 @@ static uint8_t *make_attach_image(size_t *out_len)
     return img;
 }
 
+/* ---- FDS-106: file-count services $E484 GetNumFiles / $E492 SetNumFiles ----
+ *
+ * Documented contract (https://www.nesdev.org/wiki/FDS_BIOS, "Low-Level Disk
+ * access routines"):
+ *   $E484 GetNumFiles  no input;            $06 = # of files (read from the
+ *                                           file amount block)
+ *   $E492 SetNumFiles  A = # of files;      no output (writes A into the file
+ *                                           amount block)
+ */
+
+#define FDS_TEST_SIDE_BYTES 65500u
+#define FDS_TEST_HEADER_BYTES 16u
+#define FDS_TEST_ZP_NUM_FILES 6u
+#define FDS_TEST_GET_NUM_FILES 0xE484u
+#define FDS_TEST_SET_NUM_FILES 0xE492u
+
+/* Build one side: disk info block (0x01, 0x38 bytes), file amount block
+ * (0x02, count), then `files` file header blocks (0x03) each followed by its
+ * data block (0x04). Remaining side bytes stay zero (accepted padding). */
+static void build_side_files(uint8_t *side, unsigned files, uint8_t first_id)
+{
+    size_t pos = 0;
+    unsigned i;
+
+    memset(side, 0, FDS_TEST_SIDE_BYTES);
+    side[pos] = 0x01;
+    memcpy(side + pos + 1, "*NINTENDO-HVC*", 14);
+    side[pos + 0x0F] = 0x01;       /* licensee */
+    memcpy(side + pos + 0x10, "TST", 3);
+    side[pos + 0x13] = 0x20;       /* normal disk */
+    side[pos + 0x14] = 0x00;       /* version */
+    side[pos + 0x15] = 0x00;       /* side */
+    side[pos + 0x16] = 0x00;       /* disk number */
+    side[pos + 0x17] = 0x00;       /* disk type */
+    side[pos + 0x18] = 0x00;
+    side[pos + 0x19] = 0x02;       /* boot read file code */
+    pos += 0x38;
+
+    side[pos] = 0x02;
+    side[pos + 1] = (uint8_t)files;
+    pos += 2;
+
+    for (i = 0; i < files; i++) {
+        side[pos] = 0x03;
+        side[pos + 1] = (uint8_t)i;                  /* file number */
+        side[pos + 2] = (uint8_t)(first_id + i);     /* file ID */
+        memcpy(side + pos + 3, "TEST    ", 8);
+        put16(side + pos + 0x0B, (uint16_t)(0x6000u + i * 0x10u));
+        put16(side + pos + 0x0D, 4u);
+        side[pos + 0x0F] = 0x00;                     /* program */
+        pos += 0x10;
+
+        side[pos] = 0x04;
+        memcpy(side + pos + 1, "ABCD", 4);
+        pos += 5;
+    }
+}
+
+/* fwNES-headed image: side 0 holds `first_side_files` files, then
+ * `extra_sides` further sides holding one file each. */
+static uint8_t *make_numfiles_image(unsigned first_side_files, unsigned extra_sides, size_t *out_len)
+{
+    size_t sides = 1u + (size_t)extra_sides;
+    size_t total = FDS_TEST_HEADER_BYTES + sides * FDS_TEST_SIDE_BYTES;
+    uint8_t *img = (uint8_t *)calloc(1, total);
+    unsigned s;
+
+    if (img == NULL) {
+        return NULL;
+    }
+    img[0] = 'F';
+    img[1] = 'D';
+    img[2] = 'S';
+    img[3] = 0x1A;
+    img[4] = (uint8_t)sides;
+    build_side_files(img + FDS_TEST_HEADER_BYTES, first_side_files, 1u);
+    for (s = 1u; s <= extra_sides; s++) {
+        build_side_files(img + FDS_TEST_HEADER_BYTES + (size_t)s * FDS_TEST_SIDE_BYTES,
+                         1u, (uint8_t)(1u + s));
+    }
+    *out_len = total;
+    return img;
+}
+
+/* Positive: two-file image, $06 = 2 and no other zero-page byte touched. */
+static int test_get_num_files(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core = fds_make_core(&fake, &bus, &desc);
+    ezhle_regs_t regs;
+    uint8_t *img;
+    size_t len = 0u;
+    int rc;
+
+    if (core == NULL) {
+        return 1;
+    }
+    img = make_numfiles_image(2u, 0u, &len);
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_fds_attach_disk(core, img, len) != EZHLE_OK) {
+        printf("  attach failed\n");
+        free(img);
+        ezhle_destroy(core);
+        return 1;
+    }
+    /* the parser copies: the caller's buffer may go away now */
+    free(img);
+
+    fake.mem[FDS_TEST_ZP_NUM_FILES] = 0xEEu;   /* sentinel, must be overwritten */
+    fake.mem[FDS_TEST_ZP_NUM_FILES + 1u] = 0x5Au; /* neighbour, must not move */
+    memset(&regs, 0, sizeof(regs));
+    rc = ezhle_fds_call(core, &regs, FDS_TEST_GET_NUM_FILES);
+    if (rc != EZHLE_OK) {
+        printf("  get rc %d\n", rc);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (fake.mem[FDS_TEST_ZP_NUM_FILES] != 2u) {
+        printf("  $06 = %u, want 2\n", fake.mem[FDS_TEST_ZP_NUM_FILES]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (fake.mem[FDS_TEST_ZP_NUM_FILES + 1u] != 0x5Au) {
+        printf("  $07 = %u, want 0x5A\n", fake.mem[FDS_TEST_ZP_NUM_FILES + 1u]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[0] != 0u) {
+        printf("  A = %u after GetNumFiles, want 0 (success convention)\n", regs.r[0]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_last_error(core)[0] != '\0') {
+        printf("  last_error set on success: %s\n", ezhle_last_error(core));
+        ezhle_destroy(core);
+        return 1;
+    }
+    ezhle_destroy(core);
+    return 0;
+}
+
+/* Positive: SetNumFiles(A) is observed by GetNumFiles. A is written verbatim
+ * (the wiki documents no validation) and SetNumFiles must not touch $06. */
+static int test_set_num_files_roundtrip(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core = fds_make_core(&fake, &bus, &desc);
+    ezhle_regs_t regs;
+    uint8_t *img;
+    size_t len = 0u;
+    const uint32_t want[] = { 1u, 0u, 0xABu, 2u };
+
+    if (core == NULL) {
+        return 1;
+    }
+    img = make_numfiles_image(2u, 0u, &len);
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_fds_attach_disk(core, img, len) != EZHLE_OK) {
+        free(img);
+        ezhle_destroy(core);
+        return 1;
+    }
+    free(img);
+
+    for (size_t k = 0; k < sizeof(want) / sizeof(want[0]); k++) {
+        int rc;
+        memset(&regs, 0, sizeof(regs));
+        fake.mem[FDS_TEST_ZP_NUM_FILES] = 0x11u;   /* must survive SetNumFiles */
+        regs.r[0] = want[k];
+        rc = ezhle_fds_call(core, &regs, FDS_TEST_SET_NUM_FILES);
+        if (rc != EZHLE_OK) {
+            printf("  set %u rc %d\n", want[k], rc);
+            ezhle_destroy(core);
+            return 1;
+        }
+        if (fake.mem[FDS_TEST_ZP_NUM_FILES] != 0x11u) {
+            printf("  SetNumFiles wrote $06 = %u\n", fake.mem[FDS_TEST_ZP_NUM_FILES]);
+            ezhle_destroy(core);
+            return 1;
+        }
+        memset(&regs, 0, sizeof(regs));
+        rc = ezhle_fds_call(core, &regs, FDS_TEST_GET_NUM_FILES);
+        if (rc != EZHLE_OK) {
+            printf("  get after set %u rc %d\n", want[k], rc);
+            ezhle_destroy(core);
+            return 1;
+        }
+        if ((uint32_t)fake.mem[FDS_TEST_ZP_NUM_FILES] != want[k]) {
+            printf("  readback $06 = %u, want %u\n",
+                   fake.mem[FDS_TEST_ZP_NUM_FILES], want[k]);
+            ezhle_destroy(core);
+            return 1;
+        }
+    }
+    ezhle_destroy(core);
+    return 0;
+}
+
+/* Negative: no disk attached. The wiki pins no guest-visible error channel for
+ * either routine, so the documented fallback is UNIMPL with the reason logged;
+ * $06 must not be fabricated and the core must stay usable afterwards. */
+static int test_num_files_no_disk(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core = fds_make_core(&fake, &bus, &desc);
+    ezhle_regs_t regs;
+    uint8_t *img;
+    size_t len = 0u;
+    int rc;
+
+    if (core == NULL) {
+        return 1;
+    }
+    fake.mem[FDS_TEST_ZP_NUM_FILES] = 0x77u;
+    memset(&regs, 0, sizeof(regs));
+    rc = ezhle_fds_call(core, &regs, FDS_TEST_GET_NUM_FILES);
+    if (rc != EZHLE_ERR_UNIMPL) {
+        printf("  get without disk rc %d, want EZHLE_ERR_UNIMPL\n", rc);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[0] != 0xFFu) {
+        printf("  A = %u, want 0xFF\n", regs.r[0]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (fake.mem[FDS_TEST_ZP_NUM_FILES] != 0x77u) {
+        printf("  $06 = %u, want untouched 0x77\n", fake.mem[FDS_TEST_ZP_NUM_FILES]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (strstr(ezhle_last_error(core), "no disk") == NULL) {
+        printf("  last_error = %s\n", ezhle_last_error(core));
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (strstr(fake.log, "no disk") == NULL) {
+        printf("  log = %s\n", fake.log);
+        ezhle_destroy(core);
+        return 1;
+    }
+
+    memset(&regs, 0, sizeof(regs));
+    regs.r[0] = 3u;
+    rc = ezhle_fds_call(core, &regs, FDS_TEST_SET_NUM_FILES);
+    if (rc != EZHLE_ERR_UNIMPL) {
+        printf("  set without disk rc %d, want EZHLE_ERR_UNIMPL\n", rc);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[0] != 0xFFu) {
+        printf("  A = %u, want 0xFF\n", regs.r[0]);
+        ezhle_destroy(core);
+        return 1;
+    }
+
+    /* the failed calls must not have damaged the core: attach and read */
+    img = make_numfiles_image(2u, 0u, &len);
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_fds_attach_disk(core, img, len) != EZHLE_OK) {
+        free(img);
+        ezhle_destroy(core);
+        return 1;
+    }
+    free(img);
+    memset(&regs, 0, sizeof(regs));
+    if (ezhle_fds_call(core, &regs, FDS_TEST_GET_NUM_FILES) != EZHLE_OK ||
+        fake.mem[FDS_TEST_ZP_NUM_FILES] != 2u) {
+        printf("  after attach $06 = %u, want 2\n", fake.mem[FDS_TEST_ZP_NUM_FILES]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    ezhle_destroy(core);
+    return 0;
+}
+
+/* Negative: detach (twice) then call is safe for both services. */
+static int test_num_files_after_detach(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core = fds_make_core(&fake, &bus, &desc);
+    ezhle_regs_t regs;
+    uint8_t *img;
+    size_t len = 0u;
+
+    if (core == NULL) {
+        return 1;
+    }
+    img = make_numfiles_image(2u, 0u, &len);
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_fds_attach_disk(core, img, len) != EZHLE_OK) {
+        free(img);
+        ezhle_destroy(core);
+        return 1;
+    }
+    free(img);
+    memset(&regs, 0, sizeof(regs));
+    if (ezhle_fds_call(core, &regs, FDS_TEST_GET_NUM_FILES) != EZHLE_OK ||
+        fake.mem[FDS_TEST_ZP_NUM_FILES] != 2u) {
+        printf("  pre-detach read failed ($06 = %u)\n", fake.mem[FDS_TEST_ZP_NUM_FILES]);
+        ezhle_destroy(core);
+        return 1;
+    }
+
+    ezhle_fds_detach_disk(core);
+    ezhle_fds_detach_disk(core);   /* idempotent */
+
+    fake.mem[FDS_TEST_ZP_NUM_FILES] = 0x33u;
+    memset(&regs, 0, sizeof(regs));
+    if (ezhle_fds_call(core, &regs, FDS_TEST_GET_NUM_FILES) != EZHLE_ERR_UNIMPL) {
+        printf("  post-detach get did not return UNIMPL\n");
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (fake.mem[FDS_TEST_ZP_NUM_FILES] != 0x33u) {
+        printf("  post-detach $06 = %u, want untouched 0x33\n",
+               fake.mem[FDS_TEST_ZP_NUM_FILES]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    memset(&regs, 0, sizeof(regs));
+    regs.r[0] = 1u;
+    if (ezhle_fds_call(core, &regs, FDS_TEST_SET_NUM_FILES) != EZHLE_ERR_UNIMPL) {
+        printf("  post-detach set did not return UNIMPL\n");
+        ezhle_destroy(core);
+        return 1;
+    }
+    ezhle_destroy(core);   /* destroy with no image attached */
+    return 0;
+}
+
+/* Determinism: the count lives in the attached image copy, so SetNumFiles
+ * survives neither detach nor a fresh attach of the same bytes, and the same
+ * call sequence produces the same results every time (no clock, no globals). */
+static int test_num_files_reattach_fresh(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core = fds_make_core(&fake, &bus, &desc);
+    ezhle_regs_t regs;
+    uint8_t *img;
+    size_t len = 0u;
+
+    if (core == NULL) {
+        return 1;
+    }
+    img = make_numfiles_image(2u, 0u, &len);
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+
+    for (unsigned round = 0; round < 2u; round++) {
+        if (ezhle_fds_attach_disk(core, img, len) != EZHLE_OK) {
+            free(img);
+            ezhle_destroy(core);
+            return 1;
+        }
+        memset(&regs, 0, sizeof(regs));
+        if (ezhle_fds_call(core, &regs, FDS_TEST_GET_NUM_FILES) != EZHLE_OK ||
+            fake.mem[FDS_TEST_ZP_NUM_FILES] != 2u) {
+            printf("  round %u fresh attach $06 = %u, want 2\n",
+                   round, fake.mem[FDS_TEST_ZP_NUM_FILES]);
+            free(img);
+            ezhle_destroy(core);
+            return 1;
+        }
+        memset(&regs, 0, sizeof(regs));
+        regs.r[0] = 1u;
+        if (ezhle_fds_call(core, &regs, FDS_TEST_SET_NUM_FILES) != EZHLE_OK) {
+            free(img);
+            ezhle_destroy(core);
+            return 1;
+        }
+        memset(&regs, 0, sizeof(regs));
+        if (ezhle_fds_call(core, &regs, FDS_TEST_GET_NUM_FILES) != EZHLE_OK ||
+            fake.mem[FDS_TEST_ZP_NUM_FILES] != 1u) {
+            printf("  round %u after set $06 = %u, want 1\n",
+                   round, fake.mem[FDS_TEST_ZP_NUM_FILES]);
+            free(img);
+            ezhle_destroy(core);
+            return 1;
+        }
+        ezhle_fds_detach_disk(core);
+        /* the caller's buffer is unchanged: the parser and the service worked
+         * on the library-owned copy */
+        if (img[FDS_TEST_HEADER_BYTES + 0x39u] != 2u) {
+            printf("  caller image mutated: count byte %u\n",
+                   img[FDS_TEST_HEADER_BYTES + 0x39u]);
+            free(img);
+            ezhle_destroy(core);
+            return 1;
+        }
+    }
+    free(img);
+    ezhle_destroy(core);
+    return 0;
+}
+
+/* Documented limitation: the library has no drive/side model, so the current
+ * side is the first side of the attached image (docs/FDS-COVERAGE.md). */
+static int test_num_files_multi_side(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core = fds_make_core(&fake, &bus, &desc);
+    ezhle_regs_t regs;
+    uint8_t *img;
+    size_t len = 0u;
+
+    if (core == NULL) {
+        return 1;
+    }
+    img = make_numfiles_image(2u, 1u, &len);   /* side 0: 2 files, side 1: 1 */
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_fds_attach_disk(core, img, len) != EZHLE_OK) {
+        free(img);
+        ezhle_destroy(core);
+        return 1;
+    }
+    free(img);
+    memset(&regs, 0, sizeof(regs));
+    if (ezhle_fds_call(core, &regs, FDS_TEST_GET_NUM_FILES) != EZHLE_OK ||
+        fake.mem[FDS_TEST_ZP_NUM_FILES] != 2u) {
+        printf("  two-side $06 = %u, want 2 (first side)\n",
+               fake.mem[FDS_TEST_ZP_NUM_FILES]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    ezhle_destroy(core);
+    return 0;
+}
+
+/* Negative: the $06 store goes through the bus; a faulting write must be
+ * reported, not swallowed. */
+static int test_get_num_files_write_fault(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core;
+    ezhle_regs_t regs;
+    uint8_t *img;
+    size_t len = 0u;
+    int rc;
+
+    memset(&fake, 0, sizeof(fake));
+    memset(&bus, 0, sizeof(bus));
+    bus.read32 = fds_fake_read32;
+    bus.write32 = fail_write32;
+    bus.read_bytes = fds_fake_read_bytes;
+    bus.log = fds_fake_log;
+    bus.trace = fds_fake_trace;
+    bus.ctx = &fake;
+    EZHLE_DESC_INIT(&desc, "fds", "test", &bus);
+    core = ezhle_create(&desc);
+    if (core == NULL) {
+        return 1;
+    }
+    img = make_numfiles_image(2u, 0u, &len);
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_fds_attach_disk(core, img, len) != EZHLE_OK) {
+        free(img);
+        ezhle_destroy(core);
+        return 1;
+    }
+    free(img);
+    memset(&regs, 0, sizeof(regs));
+    rc = ezhle_fds_call(core, &regs, FDS_TEST_GET_NUM_FILES);
+    if (rc != EZHLE_ERR_FAULT) {
+        printf("  rc %d, want EZHLE_ERR_FAULT\n", rc);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[0] > 0xFFu) {
+        printf("  A out of 8-bit: %u\n", regs.r[0]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_last_error(core)[0] == '\0') {
+        printf("  no last_error\n");
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (fake.log_len == 0) {
+        printf("  no log\n");
+        ezhle_destroy(core);
+        return 1;
+    }
+    ezhle_destroy(core);
+    return 0;
+}
+
 static int test_attach_disk(void)
 {
     fds_fake_bus_t fake;
@@ -647,6 +1168,13 @@ int main(void)
     failed += run("range_nam2pixel", test_range_nam2pixel);
     failed += run("nam2pixel_cov", test_nam2pixel_cov);
     failed += run("attach_disk", test_attach_disk);
+    failed += run("get_num_files", test_get_num_files);
+    failed += run("set_num_files", test_set_num_files_roundtrip);
+    failed += run("num_files_no_disk", test_num_files_no_disk);
+    failed += run("num_files_detached", test_num_files_after_detach);
+    failed += run("num_files_reattach", test_num_files_reattach_fresh);
+    failed += run("num_files_two_sides", test_num_files_multi_side);
+    failed += run("get_num_files_fault", test_get_num_files_write_fault);
 
     if (failed != 0) {
         printf("\n%d test(s) failed\n", failed);
