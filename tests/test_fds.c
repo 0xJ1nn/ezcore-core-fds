@@ -235,6 +235,37 @@ static int test_unknown_entry(void)
     return 0;
 }
 
+/* An entry present in the table but documented-unimplemented must still return
+ * UNIMPL, set A=$FF, and log. 0xE153 Delayms is implemented=0. */
+static int test_implemented_unimpl(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core = fds_make_core(&fake, &bus, &desc);
+    ezhle_regs_t regs;
+    int rc;
+
+    if (core == NULL) {
+        return 1;
+    }
+    memset(&regs, 0, sizeof(regs));
+    regs.pc = 0xE153u; /* Delayms, implemented=0 */
+    rc = ezhle_dispatch(core, &regs);
+    if (rc != EZHLE_ERR_UNIMPL || regs.r[0] != 0xFFu) {
+        printf("  rc %d A %u\n", rc, regs.r[0]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_last_error(core)[0] == '\0' || fake.log_len == 0) {
+        printf("  missing error/log\n");
+        ezhle_destroy(core);
+        return 1;
+    }
+    ezhle_destroy(core);
+    return 0;
+}
+
 static int test_fds_call_helper(void)
 {
     fds_fake_bus_t fake;
@@ -1158,6 +1189,7 @@ int main(void)
     failed += run("reset_vector", test_reset_vector);
     failed += run("implemented_entry", test_implemented_entry);
     failed += run("unknown_entry", test_unknown_entry);
+    failed += run("implemented_unimpl", test_implemented_unimpl);
     failed += run("fds_call", test_fds_call_helper);
     failed += run("entry_table", test_entry_table);
     failed += run("null_guards", test_null_guards);

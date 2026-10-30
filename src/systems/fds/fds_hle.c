@@ -372,14 +372,17 @@ static int fds_dispatch(ezhle_core_t *core, ezhle_regs_t *regs)
 
     if (ret == EZHLE_ERR_UNIMPL) {
         if (info->implemented) {
-            regs->r[EZHLE_FDS_REG_A] = 0xFFu;
-            return EZHLE_ERR_UNIMPL;
+            (void)snprintf(msg, sizeof(msg),
+                           "implemented FDS entry %s ($%04" PRIx16 ") returned UNIMPL",
+                           info->name, entry);
+            fds_log(core, msg);
+        } else {
+            (void)snprintf(msg, sizeof(msg),
+                           "unimplemented FDS entry %s ($%04" PRIx16 ")",
+                           info->name, entry);
+            ezhle_set_error(core, "%s", msg);
+            fds_log(core, msg);
         }
-        (void)snprintf(msg, sizeof(msg),
-                       "unimplemented FDS entry %s ($%04" PRIx16 ")",
-                       info->name, entry);
-        ezhle_set_error(core, "%s", msg);
-        fds_log(core, msg);
         regs->r[EZHLE_FDS_REG_A] = 0xFFu;
         return EZHLE_ERR_UNIMPL;
     }
