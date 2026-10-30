@@ -19,8 +19,10 @@ LIB := build/libezhle.a
 FDS_TEST := build/test_fds
 IMAGE_TEST := build/test_fds_image
 CPP_TEST := build/test_cpp_smoke
+FUZZ_BIN := build/fuzz_fds_image
+CORPUS_DIR := corpus/fuzz_fds_image
 
-.PHONY: all test test-cxx asan clean
+.PHONY: all test test-cxx asan fuzz fuzz-libfuzzer fuzz-corpus clean
 
 all: $(LIB)
 
@@ -55,5 +57,23 @@ asan:
 	$(MAKE) clean
 	$(MAKE) test CFLAGS="-std=c11 -Wall -Wextra -Werror -pedantic -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
 
+$(FUZZ_BIN): tests/fuzz_fds_image.c src/systems/fds/fds_image.c $(HEADERS)
+	@mkdir -p build
+	$(CC) $(CFLAGS) $(CPPFLAGS) -O1 -g -o $@ tests/fuzz_fds_image.c src/systems/fds/fds_image.c
+
+fuzz-libfuzzer: tests/fuzz_fds_image.c src/systems/fds/fds_image.c $(HEADERS)
+	@mkdir -p build
+	$(CC) $(CFLAGS) $(CPPFLAGS) -O1 -g -fsanitize=fuzzer,address,undefined -DUSE_LIBFUZZER -fno-omit-frame-pointer -o build/fuzz_fds_image_libfuzzer tests/fuzz_fds_image.c src/systems/fds/fds_image.c
+	./build/fuzz_fds_image_libfuzzer -max_total_time=60 corpus/fuzz_fds_image
+
+fuzz: $(FUZZ_BIN) fuzz-corpus
+	@for f in $(CORPUS_DIR)/*; do ./$(FUZZ_BIN) "$$f" || exit 1; done
+	@./$(FUZZ_BIN) --random
+	@echo "fuzz: synthetic corpus + 20000 random inputs passed (libFuzzer runtime is optional)"
+
+fuzz-corpus:
+	@mkdir -p $(CORPUS_DIR)
+	@python3 tests/gen_fuzz_corpus.py $(CORPUS_DIR)
+
 clean:
-	rm -rf build
+	rm -rf build $(CORPUS_DIR) corpus

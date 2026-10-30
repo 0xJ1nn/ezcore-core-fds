@@ -3,3 +3,6 @@ dist/
 *.o
 *.a
 .DS_Store
+
+# generated fuzz corpus
+corpus/
