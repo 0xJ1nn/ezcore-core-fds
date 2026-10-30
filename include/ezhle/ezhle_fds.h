@@ -65,4 +65,10 @@ uint16_t ezhle_fds_reset_vector(ezhle_core_t *core);
  */
 int ezhle_fds_call(ezhle_core_t *core, ezhle_regs_t *regs, uint16_t entry);
 
+/* Attach/detach a parsed FDS disk image to a core's FDS state.
+ * Returns EZHLE_OK on success, EZHLE_ERR_ARG for bad arguments,
+ * EZHLE_ERR_STATE when the image cannot be parsed (state untouched). */
+int ezhle_fds_attach_disk(ezhle_core_t *core, const uint8_t *data, size_t len);
+void ezhle_fds_detach_disk(ezhle_core_t *core);
+
 #endif /* EZHLE_EZHLE_FDS_H */

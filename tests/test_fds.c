@@ -1,9 +1,11 @@
 #include "common/ezhle_internal.h"
 #include "ezhle/ezhle.h"
 #include "ezhle/ezhle_fds.h"
+#include "ezhle/ezhle_fds_image.h"
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct {
@@ -538,6 +540,88 @@ static int test_nam2pixel_cov(void)
 
 typedef int (*test_fn_t)(void);
 
+static void put16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v & 0xFFu);
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static uint8_t *make_attach_image(size_t *out_len)
+{
+    const size_t side_bytes = 65500u;
+    const size_t header_bytes = 16u;
+    size_t total = header_bytes + side_bytes;
+    uint8_t *img = (uint8_t *)calloc(1, total);
+    size_t pos;
+    uint8_t *side;
+
+    if (img == NULL) {
+        return NULL;
+    }
+    img[0] = 'F'; img[1] = 'D'; img[2] = 'S'; img[3] = 0x1A; img[4] = 1;
+    side = img + header_bytes;
+    pos = 0;
+    side[pos] = 0x01;
+    memcpy(side + pos + 1, "*NINTENDO-HVC*", 14);
+    side[pos + 0x19] = 0x02;
+    pos += 0x38;
+    side[pos] = 0x02;
+    side[pos + 1] = 1;
+    pos += 2;
+    side[pos] = 0x03;
+    side[pos + 1] = 0;
+    side[pos + 2] = 1;
+    memcpy(side + pos + 3, "TEST    ", 8);
+    put16(side + pos + 0x0B, 0x6000u);
+    put16(side + pos + 0x0D, 4u);
+    side[pos + 0x0F] = 0u;
+    pos += 0x10;
+    side[pos] = 0x04;
+    memcpy(side + pos + 1, "ABCD", 4);
+    *out_len = total;
+    return img;
+}
+
+static int test_attach_disk(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core = fds_make_core(&fake, &bus, &desc);
+    uint8_t *img;
+    size_t len = 0;
+    int rc;
+
+    if (core == NULL) {
+        return 1;
+    }
+    img = make_attach_image(&len);
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+
+    rc = ezhle_fds_attach_disk(core, img, len);
+    if (rc != EZHLE_OK) { printf("  attach valid rc=%d\n", rc); free(img); ezhle_destroy(core); return 1; }
+    /* A second attach must replace the owned image without leaking. */
+    rc = ezhle_fds_attach_disk(core, img, len);
+    if (rc != EZHLE_OK) { printf("  attach twice rc=%d\n", rc); free(img); ezhle_destroy(core); return 1; }
+
+    if (ezhle_fds_attach_disk(NULL, img, len) != EZHLE_ERR_ARG) { free(img); ezhle_destroy(core); return 1; }
+    if (ezhle_fds_attach_disk(core, NULL, len) != EZHLE_ERR_ARG) { free(img); ezhle_destroy(core); return 1; }
+    if (ezhle_fds_attach_disk(core, img, 0) != EZHLE_ERR_ARG) { free(img); ezhle_destroy(core); return 1; }
+    {
+        const uint8_t bad[4] = {0, 0, 0, 0};
+        if (ezhle_fds_attach_disk(core, bad, sizeof(bad)) != EZHLE_ERR_STATE) { free(img); ezhle_destroy(core); return 1; }
+    }
+
+    ezhle_fds_detach_disk(core);
+    ezhle_fds_detach_disk(core);
+    free(img);
+    ezhle_destroy(core);
+    return 0;
+}
+
 static int run(const char *name, test_fn_t fn)
 {
     int rc = fn();
@@ -562,6 +646,7 @@ int main(void)
     failed += run("errprop_write", test_errprop_write);
     failed += run("range_nam2pixel", test_range_nam2pixel);
     failed += run("nam2pixel_cov", test_nam2pixel_cov);
+    failed += run("attach_disk", test_attach_disk);
 
     if (failed != 0) {
         printf("\n%d test(s) failed\n", failed);
