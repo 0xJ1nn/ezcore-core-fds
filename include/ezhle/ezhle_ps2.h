@@ -3,6 +3,10 @@
 
 #include "ezhle/ezhle.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* PS/2 EE syscall ABI: number in $v1, return in $v0. */
 #define EZHLE_PS2_SYSCALL_REG 3u
 #define EZHLE_PS2_RETURN_REG 2u
@@ -19,5 +23,9 @@ int ezhle_ps2_romdir_parse(const uint8_t *data, size_t size,
                            size_t *out_count);
 const ezhle_romdir_entry_t *ezhle_ps2_romdir_find(
     const ezhle_romdir_entry_t *entries, size_t count, const char *name);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

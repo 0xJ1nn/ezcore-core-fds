@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean-room and provenance check
+        run: sh scripts/check_clean.sh
+      - name: C11 build and tests
+        run: make test
+      - name: C++17 consumer ABI link
+        run: make test-cxx
+      - name: ASan + UBSan
+        if: runner.os == 'Linux'
+        run: make asan

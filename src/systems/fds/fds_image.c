@@ -3,7 +3,7 @@
  * Provenance: clean-room implementation from public format documentation.
  * Sources: https://www.nesdev.org/wiki/FDS_file_format
  *          https://www.nesdev.org/wiki/FDS_disk_format
- * Authors: Hermes Agent, 2026-10-30
+ * Authors: ezCORE contributors, 2026-10-30
  * Reviewed-by: pending independent review (G4)
  */
 #include "ezhle/ezhle_fds_image.h"

@@ -3,10 +3,10 @@
 An installable **HLE library package** for the Famicom Disk System, built by
 ezCORE HLE Labs. No BIOS, no firmware, no ROM, no key.
 
-**Status: `0.1.3` lab.** This is a library, not a playable libretro core. It
-implements 3 of the 36 documented FDS BIOS entry points plus a clean-room FDS
+**Status: `0.1.4` lab.** This is a library, not a playable libretro core. It
+implements 5 of the 36 documented FDS BIOS entry points plus a clean-room FDS
 disk image parser. Everything else returns `EZHLE_ERR_UNIMPL` and logs; nothing
-is faked.
+is faked. No game boot or compatibility claim is made.
 
 ## What is in the box
 
@@ -24,9 +24,19 @@ SHA256SUMS                         every shipped byte, pinned
 
 ```bash
 make test       # unit tests for entry table and image parser
+make test-cxx   # C++17 consumer includes public headers and links the C ABI
 make asan       # ASan/UBSan
 make all        # build lib/libezhle.a
+sh scripts/check_clean.sh   # no ROM/BIOS/keys/binary/internal markers
 ```
+
+## Safety and language
+
+- `docs/CLEAN_ROOM.md` — provenance rules, synthetic fixtures only, UNKNOWN -> UNIMPL
+- `docs/SOURCES.md` — the only allowed public sources for FDS behavior
+- `docs/LANGUAGE.md` — C11 core with a C ABI; C++17 hosts are supported and
+  tested, but the core is not rewritten in C++ (no speed benefit, worse ABI
+  portability).
 
 ## Install
 

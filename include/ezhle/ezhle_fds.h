@@ -6,6 +6,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Famicom Disk System BIOS HLE.
  *
@@ -70,5 +74,9 @@ int ezhle_fds_call(ezhle_core_t *core, ezhle_regs_t *regs, uint16_t entry);
  * EZHLE_ERR_STATE when the image cannot be parsed (state untouched). */
 int ezhle_fds_attach_disk(ezhle_core_t *core, const uint8_t *data, size_t len);
 void ezhle_fds_detach_disk(ezhle_core_t *core);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* EZHLE_EZHLE_FDS_H */

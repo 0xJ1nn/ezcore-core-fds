@@ -2,7 +2,7 @@
 /* ezCORE HLE — FDS image parser tests
  * Provenance: original test code from public format documentation.
  * Sources: https://www.nesdev.org/wiki/FDS_disk_format
- * Authors: Hermes Agent, 2026-10-30
+ * Authors: ezCORE contributors, 2026-10-30
  */
 #include "ezhle/ezhle_fds_image.h"
 
