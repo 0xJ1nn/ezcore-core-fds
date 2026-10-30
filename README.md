@@ -3,7 +3,7 @@
 An installable **HLE library package** for the Famicom Disk System, built by
 ezCORE HLE Labs. No BIOS, no firmware, no ROM, no key.
 
-**Status: `0.1.0` lab.** This is a library, not a playable libretro core. It
+**Status: `0.1.1` lab.** This is a library, not a playable libretro core. It
 implements 3 of the 36 documented FDS BIOS entry points plus a clean-room FDS
 disk image parser. Everything else returns `EZHLE_ERR_UNIMPL` and logs; nothing
 is faked.
@@ -14,9 +14,18 @@ is faked.
 include/ezhle/ezhle.h              public ABI (ezhle-2)
 include/ezhle/ezhle_fds.h          FDS entry-point table and call helper
 include/ezhle/ezhle_fds_image.h    .fds image parser
-lib/libezhle.a                     static library, BSD-2-Clause
+src/                               FDS-only source, PS2 stubbed out
+lib/libezhle.a                     static library built from src/, BSD-2-Clause
 manifest.json                      package metadata
 SHA256SUMS                         every shipped byte, pinned
+```
+
+## Build and test
+
+```bash
+make test       # unit tests for entry table and image parser
+make asan       # ASan/UBSan
+make all        # build lib/libezhle.a
 ```
 
 ## Install
@@ -44,7 +53,7 @@ sha256sum -c SHA256SUMS         # Linux
 #include "ezhle/ezhle_fds.h"
 #include "ezhle/ezhle_fds_image.h"
 
-ezhle_disk *disk = ezhle_fds_image_open(bytes, len, &err);
+ezhle_fds_image *disk = ezhle_fds_image_open(bytes, len, &err);
 const ezhle_fds_image_file *file = ezhle_fds_image_find(disk, 0);
 /* attach the HLE to a core you own, then dispatch a guest JSR */
 ezhle_fds_call(core, &regs, 0xE97D);
