@@ -1,6 +1,7 @@
 #include "common/ezhle_internal.h"
 #include "ezhle/ezhle.h"
 #include "ezhle/ezhle_fds.h"
+#include "ezhle/ezhle_fds_image.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -12,6 +13,8 @@ typedef struct {
     uint16_t reset_dispatch;
     /* Last entry point dispatched (for diagnostics). */
     uint16_t last_entry;
+    /* Attached FDS disk image (owned). */
+    ezhle_fds_image *disk;
 } fds_state_t;
 
 static fds_state_t *fds_state(ezhle_core_t *core)
@@ -21,6 +24,10 @@ static fds_state_t *fds_state(ezhle_core_t *core)
     }
     return (fds_state_t *)core->state;
 }
+
+/* Forward declarations. */
+int ezhle_fds_attach_disk(ezhle_core_t *core, const uint8_t *data, size_t len);
+void ezhle_fds_detach_disk(ezhle_core_t *core);
 
 /* ---- bus helpers (8-bit, bounds-checked by the core) ---- */
 
@@ -347,7 +354,9 @@ static void fds_reset(ezhle_core_t *core)
     }
     st = fds_state(core);
     if (st != NULL) {
+        ezhle_fds_image *disk = st->disk;
         memset(st, 0, sizeof(*st));
+        st->disk = disk;
         st->reset_dispatch = fds_read16(core, EZHLE_FDS_RESET_VECTOR_ADDR);
     }
 }
@@ -357,6 +366,7 @@ static void fds_destroy(ezhle_core_t *core)
     if (core == NULL) {
         return;
     }
+    ezhle_fds_detach_disk(core);
     free(core->state);
     core->state = NULL;
 }
@@ -369,6 +379,7 @@ int ezhle_fds_attach(ezhle_core_t *core)
         return EZHLE_ERR_ARG;
     }
     if (core->state != NULL) {
+        ezhle_fds_detach_disk(core);
         free(core->state);
         core->state = NULL;
     }
@@ -383,6 +394,43 @@ int ezhle_fds_attach(ezhle_core_t *core)
     st->reset_dispatch = fds_read16(core, EZHLE_FDS_RESET_VECTOR_ADDR);
     /* Populate reset dispatch after wiring (reset_fn will be called by ezhle_reset). */
     return EZHLE_OK;
+}
+
+int ezhle_fds_attach_disk(ezhle_core_t *core, const uint8_t *data, size_t len)
+{
+    fds_state_t *st;
+    ezhle_fds_image *new_disk;
+
+    if (core == NULL || data == NULL || len == 0u) {
+        return EZHLE_ERR_ARG;
+    }
+    st = fds_state(core);
+    if (st == NULL) {
+        return EZHLE_ERR_STATE;
+    }
+    new_disk = ezhle_fds_image_open(data, len, NULL);
+    if (new_disk == NULL) {
+        return EZHLE_ERR_STATE;
+    }
+    if (st->disk != NULL) {
+        ezhle_fds_image_close(st->disk);
+    }
+    st->disk = new_disk;
+    return EZHLE_OK;
+}
+
+void ezhle_fds_detach_disk(ezhle_core_t *core)
+{
+    fds_state_t *st;
+
+    st = fds_state(core);
+    if (st == NULL) {
+        return;
+    }
+    if (st->disk != NULL) {
+        ezhle_fds_image_close(st->disk);
+        st->disk = NULL;
+    }
 }
 
 /* Ensure reset_dispatch is populated even without an explicit reset call. */

@@ -1,7 +1,7 @@
 {
   "id": "ezhle-fds",
   "name": "ezCORE HLE \u2014 Famicom Disk System",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "BSD-2-Clause",
   "system": "fds",
   "kind": "hle-library",
@@ -10,5 +10,5 @@
   "provides": [
     "bios-hle"
   ],
-  "notes": "FDS-only source included; PS2 is a separate HLE repository. No compatibility claim."
+  "notes": "Adds owned disk attach/detach API with ASan-tested lifecycle. No BIOS/ROM. Claim unchanged."
 }

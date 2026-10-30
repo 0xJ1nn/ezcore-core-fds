@@ -3,7 +3,7 @@
 An installable **HLE library package** for the Famicom Disk System, built by
 ezCORE HLE Labs. No BIOS, no firmware, no ROM, no key.
 
-**Status: `0.1.1` lab.** This is a library, not a playable libretro core. It
+**Status: `0.1.2` lab.** This is a library, not a playable libretro core. It
 implements 3 of the 36 documented FDS BIOS entry points plus a clean-room FDS
 disk image parser. Everything else returns `EZHLE_ERR_UNIMPL` and logs; nothing
 is faked.
@@ -13,7 +13,7 @@ is faked.
 ```
 include/ezhle/ezhle.h              public ABI (ezhle-2)
 include/ezhle/ezhle_fds.h          FDS entry-point table and call helper
-include/ezhle/ezhle_fds_image.h    .fds image parser
+include/ezhle/ezhle_fds_image.h    .fds image parser and attach API
 src/                               FDS-only source, PS2 stubbed out
 lib/libezhle.a                     static library built from src/, BSD-2-Clause
 manifest.json                      package metadata
@@ -71,6 +71,7 @@ through the `ezhle_bus_t` callbacks the host core supplies.
 | Entry table | 36 documented addresses |
 | Implemented services | `Delay131` `$E149`, `Pixel2NamConv` `$E97D`, `Nam2PixelConv` `$E997` |
 | Disk image parser | fwNES header and headerless, multi-side, file table, bounds |
+| Attach / detach | owned image lifecycle, double-attach safe, ASan clean |
 | Everything else | `EZHLE_ERR_UNIMPL`, logged, no silent success |
 | Playable game | **no** — this package is not a full NES/FDS core |
 
