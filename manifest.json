@@ -1,12 +1,14 @@
 {
   "id": "ezhle-fds",
-  "name": "ezCORE HLE — Famicom Disk System",
-  "version": "0.1.0",
+  "name": "ezCORE HLE \u2014 Famicom Disk System",
+  "version": "0.1.1",
   "license": "BSD-2-Clause",
   "system": "fds",
   "kind": "hle-library",
   "abi": "ezhle-2",
   "status": "lab",
-  "provides": ["bios-hle"],
-  "notes": "Scaffold. No compatibility claim."
+  "provides": [
+    "bios-hle"
+  ],
+  "notes": "FDS-only source included; PS2 is a separate HLE repository. No compatibility claim."
 }
