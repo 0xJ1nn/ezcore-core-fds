@@ -3,7 +3,7 @@
 An installable **HLE library package** for the Famicom Disk System, built by
 ezCORE HLE Labs. No BIOS, no firmware, no ROM, no key.
 
-**Status: `0.1.4` lab.** This is a library, not a playable libretro core. It
+**Status: `0.1.5` lab.** This is a library, not a playable libretro core. It
 implements 5 of the 36 documented FDS BIOS entry points plus a clean-room FDS
 disk image parser. Everything else returns `EZHLE_ERR_UNIMPL` and logs; nothing
 is faked. No game boot or compatibility claim is made.
