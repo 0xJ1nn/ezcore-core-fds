@@ -128,6 +128,9 @@ int ezhle_dispatch(ezhle_core_t *core, ezhle_regs_t *regs)
         ezhle_set_error(core, "no dispatch backend");
         return EZHLE_ERR_UNIMPL;
     }
+    /* Each dispatch is a fresh, deterministic step: do not leak a stale
+     * error from a previous instruction into this one's result. */
+    core->error[0] = '\0';
     return core->dispatch_fn(core, regs);
 }
 
