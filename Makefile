@@ -18,6 +18,7 @@ OBJ := $(SRC:%.c=build/%.o)
 LIB := build/libezhle.a
 FDS_TEST := build/test_fds
 IMAGE_TEST := build/test_fds_image
+AUD_TEST := build/test_fds_aud_002
 CPP_TEST := build/test_cpp_smoke
 FUZZ_BIN := build/fuzz_fds_image
 CORPUS_DIR := corpus/fuzz_fds_image
@@ -42,9 +43,14 @@ $(IMAGE_TEST): tests/test_fds_image.c src/systems/fds/fds_image.c $(HEADERS)
 	@mkdir -p build
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(filter %.c,$^)
 
-test: $(FDS_TEST) $(IMAGE_TEST)
+$(AUD_TEST): tests/test_fds_aud_002.c $(SRC) $(HEADERS)
+	@mkdir -p build
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ tests/test_fds_aud_002.c src/common/ezhle.c src/common/ezhle_ps2_stub.c src/systems/fds/fds_hle.c src/systems/fds/fds_image.c
+
+test: $(FDS_TEST) $(IMAGE_TEST) $(AUD_TEST)
 	./$(FDS_TEST)
 	./$(IMAGE_TEST)
+	./$(AUD_TEST)
 
 $(CPP_TEST): tests/test_cpp_smoke.cpp $(LIB) $(HEADERS)
 	@mkdir -p build
