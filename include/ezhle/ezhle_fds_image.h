@@ -49,6 +49,10 @@ const ezhle_fds_image_file *ezhle_fds_image_find(const ezhle_fds_image *disk, ui
 uint8_t ezhle_fds_image_boot_read_code(const ezhle_fds_image *disk);
 uint8_t ezhle_fds_image_side_count(const ezhle_fds_image *disk);
 
+/* Copy the 10-byte Disk ID from the first (current) side's info block into
+ * out[0..9]. Returns 0 on success, -1 on bad arguments / unavailable data. */
+int ezhle_fds_image_first_side_disk_id(const ezhle_fds_image *disk, uint8_t out[10]);
+
 #ifdef __cplusplus
 }
 #endif

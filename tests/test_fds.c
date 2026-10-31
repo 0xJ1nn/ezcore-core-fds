@@ -1174,6 +1174,358 @@ static int test_attach_disk(void)
     return 0;
 }
 
+/* ---- FDS-108: LoadFiles $E1F8 tests ---- */
+
+#define LF_ENTRY 0xE1F8u
+#define LF_SP 0xFCu
+#define LF_RET 0x0300u
+#define LF_DISKID 0x0400u
+#define LF_LIST 0x0500u
+
+static uint8_t *make_lf_image(unsigned side0_files, unsigned side1_files,
+                              uint8_t side1_first_id, size_t *out_len)
+{
+    size_t sides = (side1_files > 0u) ? 2u : 1u;
+    size_t total = FDS_TEST_HEADER_BYTES + sides * FDS_TEST_SIDE_BYTES;
+    uint8_t *img = (uint8_t *)calloc(1, total);
+
+    if (img == NULL) {
+        return NULL;
+    }
+    img[0] = 'F'; img[1] = 'D'; img[2] = 'S'; img[3] = 0x1A;
+    img[4] = (uint8_t)sides;
+    build_side_files(img + FDS_TEST_HEADER_BYTES, side0_files, 1u);
+    if (side1_files > 0u) {
+        build_side_files(img + FDS_TEST_HEADER_BYTES + FDS_TEST_SIDE_BYTES,
+                         side1_files, side1_first_id);
+    }
+    *out_len = total;
+    return img;
+}
+
+static void lf_setup_guest(fds_fake_bus_t *fake, const uint8_t *list, size_t list_n)
+{
+    size_t i;
+
+    fake->mem[0x01FC] = (uint8_t)(LF_RET & 0xFFu);
+    fake->mem[0x01FD] = (uint8_t)(LF_RET >> 8);
+    for (i = 0; i < 10u; i++) {
+        fake->mem[LF_DISKID + i] = 0xFFu;
+    }
+    for (i = 0; i < list_n; i++) {
+        fake->mem[LF_LIST + i] = list[i];
+    }
+    if (list_n == 0u || list[list_n - 1u] != 0xFFu) {
+        fake->mem[LF_LIST + list_n] = 0xFFu;
+    }
+    put16(fake->mem + LF_RET, LF_DISKID);
+    put16(fake->mem + LF_RET + 2, LF_LIST);
+}
+
+static int test_loadfiles_no_disk(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core = fds_make_core(&fake, &bus, &desc);
+    ezhle_regs_t regs;
+    int rc;
+
+    if (core == NULL) {
+        return 1;
+    }
+    memset(&regs, 0, sizeof(regs));
+    rc = ezhle_fds_call(core, &regs, LF_ENTRY);
+    if (rc != EZHLE_ERR_FAULT) {
+        printf("  rc %d, want EZHLE_ERR_FAULT\\n", rc);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[0] != 0x01u) {
+        printf("  A = %u, want 0x01\\n", regs.r[0]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[2] != 0u) {
+        printf("  Y = %u, want 0\\n", regs.r[2]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (strstr(fake.log, "no disk") == NULL) {
+        printf("  log = %s\\n", fake.log);
+        ezhle_destroy(core);
+        return 1;
+    }
+    ezhle_destroy(core);
+    return 0;
+}
+
+static int test_loadfiles_missing_file(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core;
+    ezhle_regs_t regs;
+    uint8_t *img;
+    size_t len = 0u;
+    const uint8_t list[] = { 1u, 9u, 0xFFu };
+    int rc;
+
+    memset(&fake, 0, sizeof(fake));
+    memset(&bus, 0, sizeof(bus));
+    bus.read32 = fds_fake_read32;
+    bus.write32 = fds_fake_write32;
+    bus.read_bytes = fds_fake_read_bytes;
+    bus.log = fds_fake_log;
+    bus.trace = fds_fake_trace;
+    bus.ctx = &fake;
+    EZHLE_DESC_INIT(&desc, "fds", "test", &bus);
+    core = ezhle_create(&desc);
+    if (core == NULL) {
+        return 1;
+    }
+    img = make_lf_image(2u, 0u, 0u, &len);
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_fds_attach_disk(core, img, len) != EZHLE_OK) {
+        free(img);
+        ezhle_destroy(core);
+        return 1;
+    }
+    free(img);
+    memset(&fake, 0, sizeof(fake));
+    /* reinit bus ctx memory already zeroed? fake zeroed, but bus still ok */
+    lf_setup_guest(&fake, list, sizeof(list));
+    memset(&regs, 0, sizeof(regs));
+    regs.r[EZHLE_FDS_REG_SP] = LF_SP;
+    rc = ezhle_fds_call(core, &regs, LF_ENTRY);
+    if (rc != EZHLE_ERR_FAULT) {
+        printf("  rc %d, want EZHLE_ERR_FAULT\\n", rc);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[0] != 0x40u) {
+        printf("  A = %u, want 0x40\\n", regs.r[0]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[2] != 0u) {
+        printf("  Y = %u, want 0\\n", regs.r[2]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (strstr(fake.log, "could not load all files") == NULL) {
+        printf("  log = %s\\n", fake.log);
+        ezhle_destroy(core);
+        return 1;
+    }
+    ezhle_destroy(core);
+    return 0;
+}
+
+static int test_loadfiles_success(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core;
+    ezhle_regs_t regs;
+    uint8_t *img;
+    size_t len = 0u;
+    const uint8_t list[] = { 1u, 2u, 0xFFu };
+    int rc;
+
+    core = fds_make_core(&fake, &bus, &desc);
+    if (core == NULL) {
+        return 1;
+    }
+    img = make_lf_image(2u, 0u, 0u, &len);
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_fds_attach_disk(core, img, len) != EZHLE_OK) {
+        free(img);
+        ezhle_destroy(core);
+        return 1;
+    }
+    free(img);
+    lf_setup_guest(&fake, list, sizeof(list));
+    memset(&regs, 0, sizeof(regs));
+    regs.r[EZHLE_FDS_REG_SP] = LF_SP;
+    rc = ezhle_fds_call(core, &regs, LF_ENTRY);
+    if (rc != EZHLE_OK) {
+        printf("  rc %d, want EZHLE_OK\\n", rc);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[0] != 0u) {
+        printf("  A = %u, want 0\\n", regs.r[0]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[2] != 2u) {
+        printf("  Y = %u, want 2\\n", regs.r[2]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (fake.mem[0x6000u] != 'A' || fake.mem[0x6001u] != 'B' ||
+        fake.mem[0x6002u] != 'C' || fake.mem[0x6003u] != 'D') {
+        printf("  file0 data mismatch\\n");
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (fake.mem[0x6010u] != 'A' || fake.mem[0x6011u] != 'B' ||
+        fake.mem[0x6012u] != 'C' || fake.mem[0x6013u] != 'D') {
+        printf("  file1 data mismatch\\n");
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (strstr(fake.log, "loaded") == NULL) {
+        printf("  log = %s\\n", fake.log);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_last_error(core)[0] != '\0') {
+        printf("  last_error = %s\\n", ezhle_last_error(core));
+        ezhle_destroy(core);
+        return 1;
+    }
+    ezhle_destroy(core);
+    return 0;
+}
+
+static int test_loadfiles_bad_direct_ptr(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core;
+    ezhle_regs_t regs;
+    uint8_t *img;
+    size_t len = 0u;
+    int rc;
+
+    core = fds_make_core(&fake, &bus, &desc);
+    if (core == NULL) {
+        return 1;
+    }
+    img = make_lf_image(2u, 0u, 0u, &len);
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_fds_attach_disk(core, img, len) != EZHLE_OK) {
+        free(img);
+        ezhle_destroy(core);
+        return 1;
+    }
+    free(img);
+    /* return address near $FFFF so reading the two pointer words overflows */
+    fake.mem[0x01FC] = 0xFEu;
+    fake.mem[0x01FD] = 0xFFu;
+    memset(&regs, 0, sizeof(regs));
+    regs.r[EZHLE_FDS_REG_SP] = LF_SP;
+    rc = ezhle_fds_call(core, &regs, LF_ENTRY);
+    if (rc != EZHLE_ERR_UNIMPL) {
+        printf("  rc %d, want EZHLE_ERR_UNIMPL\\n", rc);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[0] != 0xFFu) {
+        printf("  A = %u, want 0xFF\\n", regs.r[0]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (regs.r[2] != 0u) {
+        printf("  Y = %u, want 0\\n", regs.r[2]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (strstr(fake.log, "bad direct pointer") == NULL) {
+        printf("  log = %s\\n", fake.log);
+        ezhle_destroy(core);
+        return 1;
+    }
+    ezhle_destroy(core);
+    return 0;
+}
+
+static int test_loadfiles_multi_side(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core;
+    ezhle_regs_t regs;
+    uint8_t *img;
+    size_t len = 0u;
+    const uint8_t list1[] = { 1u, 0xFFu };
+    const uint8_t list_missing[] = { 10u, 0xFFu };
+    const uint8_t list_empty[] = { 0xFFu };
+    int rc;
+
+    core = fds_make_core(&fake, &bus, &desc);
+    if (core == NULL) {
+        return 1;
+    }
+    img = make_lf_image(2u, 1u, 10u, &len);
+    if (img == NULL) {
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (ezhle_fds_attach_disk(core, img, len) != EZHLE_OK) {
+        free(img);
+        ezhle_destroy(core);
+        return 1;
+    }
+    free(img);
+
+    /* side 0 file loads */
+    lf_setup_guest(&fake, list1, sizeof(list1));
+    memset(&regs, 0, sizeof(regs));
+    regs.r[EZHLE_FDS_REG_SP] = LF_SP;
+    rc = ezhle_fds_call(core, &regs, LF_ENTRY);
+    if (rc != EZHLE_OK || regs.r[0] != 0u || regs.r[2] != 1u) {
+        printf("  side0 load rc=%d A=%u Y=%u\\n", rc, regs.r[0], regs.r[2]);
+        ezhle_destroy(core);
+        return 1;
+    }
+    if (fake.mem[0x6000u] != 'A') {
+        printf("  side0 data missing\\n");
+        ezhle_destroy(core);
+        return 1;
+    }
+
+    /* side-1-only id is not found: only first side is considered */
+    lf_setup_guest(&fake, list_missing, sizeof(list_missing));
+    memset(&regs, 0, sizeof(regs));
+    regs.r[EZHLE_FDS_REG_SP] = LF_SP;
+    rc = ezhle_fds_call(core, &regs, LF_ENTRY);
+    if (rc != EZHLE_ERR_FAULT || regs.r[0] != 0x40u) {
+        printf("  side1-only rc=%d A=%u, want FAULT/0x40\\n", rc, regs.r[0]);
+        ezhle_destroy(core);
+        return 1;
+    }
+
+    /* empty list boot mode loads only first side's eligible files (2) */
+    lf_setup_guest(&fake, list_empty, sizeof(list_empty));
+    memset(&regs, 0, sizeof(regs));
+    regs.r[EZHLE_FDS_REG_SP] = LF_SP;
+    rc = ezhle_fds_call(core, &regs, LF_ENTRY);
+    if (rc != EZHLE_OK || regs.r[0] != 0u || regs.r[2] != 2u) {
+        printf("  empty-list rc=%d A=%u Y=%u, want OK/0/2\\n", rc, regs.r[0], regs.r[2]);
+        ezhle_destroy(core);
+        return 1;
+    }
+
+    ezhle_destroy(core);
+    return 0;
+}
+
 static int run(const char *name, test_fn_t fn)
 {
     int rc = fn();
@@ -1207,6 +1559,12 @@ int main(void)
     failed += run("num_files_reattach", test_num_files_reattach_fresh);
     failed += run("num_files_two_sides", test_num_files_multi_side);
     failed += run("get_num_files_fault", test_get_num_files_write_fault);
+
+    failed += run("loadfiles_no_disk", test_loadfiles_no_disk);
+    failed += run("loadfiles_missing", test_loadfiles_missing_file);
+    failed += run("loadfiles_success", test_loadfiles_success);
+    failed += run("loadfiles_bad_ptr", test_loadfiles_bad_direct_ptr);
+    failed += run("loadfiles_multi_side", test_loadfiles_multi_side);
 
     if (failed != 0) {
         printf("\n%d test(s) failed\n", failed);

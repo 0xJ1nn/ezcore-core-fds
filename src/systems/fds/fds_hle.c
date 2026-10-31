@@ -227,7 +227,336 @@ static int32_t fds_set_num_files(ezhle_core_t *core, ezhle_regs_t *regs)
     return 0;
 }
 
-/* ---- entry-point table ---- */
+/* ---- LoadFiles $E1F8 (FDS-108) ---- */
+
+static int fds_load_files_is_dummy(uint16_t addr, uint16_t size)
+{
+    uint32_t end = (uint32_t)addr + (uint32_t)size;
+    if (end > 0xFFFFu) {
+        return 1;
+    }
+    if (addr <= 0x01FFu) {
+        return 1;
+    }
+    if (addr >= 0x0200u && addr <= 0x07FFu) {
+        return 0;
+    }
+    if (addr >= 0x1200u && addr <= 0x17FFu) {
+        return 0;
+    }
+    if (addr < 0x2000u) {
+        return 1;
+    }
+    return 0;
+}
+
+static int32_t fds_load_files(ezhle_core_t *core, ezhle_regs_t *regs)
+{
+    ezhle_fds_image *disk = fds_attached_disk(core);
+    fds_state_t *st = fds_state(core);
+    uint8_t sp;
+    uint16_t ret_addr;
+    uint8_t stack_bytes[2];
+    uint16_t ptr_disk_id;
+    uint16_t ptr_file_list;
+    uint8_t disk_id[10];
+    uint8_t info_id[10];
+    uint8_t list_ids[20];
+    size_t list_count = 0u;
+    int empty_list = 0;
+    size_t first_count;
+    size_t loaded;
+    unsigned attempt;
+    char msg[128];
+
+    (void)st;
+
+    if (disk == NULL) {
+        ezhle_set_error(core, "LoadFiles: no disk");
+        fds_log(core, "LoadFiles: no disk");
+        regs->r[EZHLE_FDS_REG_A] = 0x01u;
+        regs->r[EZHLE_FDS_REG_Y] = 0u;
+        return EZHLE_ERR_FAULT;
+    }
+
+    /* Direct pointers: read return address from stack (little-endian). */
+    sp = (uint8_t)(regs->r[EZHLE_FDS_REG_SP] & 0xFFu);
+    if (fds_read8(core, (uint16_t)(0x0100u + sp), &stack_bytes[0]) != EZHLE_OK) {
+        ezhle_set_error(core, "LoadFiles: bad stack read");
+        fds_log(core, "LoadFiles: bad stack read");
+        regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+        regs->r[EZHLE_FDS_REG_Y] = 0u;
+        return EZHLE_ERR_UNIMPL;
+    }
+    if (fds_read8(core, (uint16_t)(0x0100u + (uint8_t)(sp + 1u)), &stack_bytes[1]) != EZHLE_OK) {
+        ezhle_set_error(core, "LoadFiles: bad stack read");
+        fds_log(core, "LoadFiles: bad stack read");
+        regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+        regs->r[EZHLE_FDS_REG_Y] = 0u;
+        return EZHLE_ERR_UNIMPL;
+    }
+    ret_addr = (uint16_t)stack_bytes[0] | ((uint16_t)stack_bytes[1] << 8);
+
+    /* Read two direct pointer words at return address and +2 (per contract). */
+    {
+        uint8_t b[4];
+        unsigned i;
+        for (i = 0u; i < 4u; i++) {
+            uint32_t a = (uint32_t)ret_addr + i;
+            if (a > 0xFFFFu) {
+                ezhle_set_error(core, "LoadFiles: bad direct pointer");
+                fds_log(core, "LoadFiles: bad direct pointer");
+                regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+                regs->r[EZHLE_FDS_REG_Y] = 0u;
+                return EZHLE_ERR_UNIMPL;
+            }
+            if (fds_read8(core, (uint16_t)a, &b[i]) != EZHLE_OK) {
+                ezhle_set_error(core, "LoadFiles: bad direct pointer");
+                fds_log(core, "LoadFiles: bad direct pointer");
+                regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+                regs->r[EZHLE_FDS_REG_Y] = 0u;
+                return EZHLE_ERR_UNIMPL;
+            }
+        }
+        ptr_disk_id = (uint16_t)b[0] | ((uint16_t)b[1] << 8);
+        ptr_file_list = (uint16_t)b[2] | ((uint16_t)b[3] << 8);
+    }
+
+    /* Fix return address to land past both pointer words. */
+    {
+        uint16_t fixed = (uint16_t)(ret_addr + 4u);
+        if (fds_write8(core, (uint16_t)(0x0100u + sp), (uint8_t)(fixed & 0xFFu)) != EZHLE_OK) {
+            ezhle_set_error(core, "LoadFiles: bad stack write");
+            fds_log(core, "LoadFiles: bad stack write");
+            regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+            regs->r[EZHLE_FDS_REG_Y] = 0u;
+            return EZHLE_ERR_UNIMPL;
+        }
+        if (fds_write8(core, (uint16_t)(0x0100u + (uint8_t)(sp + 1u)), (uint8_t)(fixed >> 8)) != EZHLE_OK) {
+            ezhle_set_error(core, "LoadFiles: bad stack write");
+            fds_log(core, "LoadFiles: bad stack write");
+            regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+            regs->r[EZHLE_FDS_REG_Y] = 0u;
+            return EZHLE_ERR_UNIMPL;
+        }
+    }
+
+    /* Read Disk ID structure (10 bytes). */
+    for (unsigned i = 0u; i < 10u; i++) {
+        uint32_t a = (uint32_t)ptr_disk_id + i;
+        if (a > 0xFFFFu) {
+            ezhle_set_error(core, "LoadFiles: bad Disk-ID pointer");
+            fds_log(core, "LoadFiles: bad Disk-ID pointer");
+            regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+            regs->r[EZHLE_FDS_REG_Y] = 0u;
+            return EZHLE_ERR_UNIMPL;
+        }
+        if (fds_read8(core, (uint16_t)a, &disk_id[i]) != EZHLE_OK) {
+            ezhle_set_error(core, "LoadFiles: bad Disk-ID pointer");
+            fds_log(core, "LoadFiles: bad Disk-ID pointer");
+            regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+            regs->r[EZHLE_FDS_REG_Y] = 0u;
+            return EZHLE_ERR_UNIMPL;
+        }
+    }
+
+    /* Read File List (up to 20 IDs, $FF terminator). */
+    {
+        uint8_t first_byte;
+        uint32_t a0 = ptr_file_list;
+        if (a0 > 0xFFFFu) {
+            ezhle_set_error(core, "LoadFiles: bad File-List pointer");
+            fds_log(core, "LoadFiles: bad File-List pointer");
+            regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+            regs->r[EZHLE_FDS_REG_Y] = 0u;
+            return EZHLE_ERR_UNIMPL;
+        }
+        if (fds_read8(core, (uint16_t)a0, &first_byte) != EZHLE_OK) {
+            ezhle_set_error(core, "LoadFiles: bad File-List pointer");
+            fds_log(core, "LoadFiles: bad File-List pointer");
+            regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+            regs->r[EZHLE_FDS_REG_Y] = 0u;
+            return EZHLE_ERR_UNIMPL;
+        }
+        if (first_byte == 0xFFu) {
+            empty_list = 1;
+        } else {
+            for (unsigned i = 0u; i < 20u; i++) {
+                uint32_t a = (uint32_t)ptr_file_list + i;
+                uint8_t b;
+                if (a > 0xFFFFu) {
+                    ezhle_set_error(core, "LoadFiles: bad File-List pointer");
+                    fds_log(core, "LoadFiles: bad File-List pointer");
+                    regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+                    regs->r[EZHLE_FDS_REG_Y] = 0u;
+                    return EZHLE_ERR_UNIMPL;
+                }
+                if (fds_read8(core, (uint16_t)a, &b) != EZHLE_OK) {
+                    ezhle_set_error(core, "LoadFiles: bad File-List pointer");
+                    fds_log(core, "LoadFiles: bad File-List pointer");
+                    regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+                    regs->r[EZHLE_FDS_REG_Y] = 0u;
+                    return EZHLE_ERR_UNIMPL;
+                }
+                if (b == 0xFFu) {
+                    break;
+                }
+                list_ids[list_count++] = b;
+                if (list_count >= 20u) {
+                    break;
+                }
+            }
+        }
+    }
+
+    if (ezhle_fds_image_first_side_disk_id(disk, info_id) != 0) {
+        ezhle_set_error(core, "LoadFiles: disk info unavailable");
+        fds_log(core, "LoadFiles: disk info unavailable");
+        regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+        regs->r[EZHLE_FDS_REG_Y] = 0u;
+        return EZHLE_ERR_UNIMPL;
+    }
+
+    /* CheckDiskHeader comparison (wildcard $FF). */
+    if (disk_id[0] != 0xFFu && disk_id[0] != info_id[0]) {
+        ezhle_set_error(core, "LoadFiles: wrong licensee code");
+        fds_log(core, "LoadFiles: wrong licensee code");
+        regs->r[EZHLE_FDS_REG_A] = 0x04u;
+        regs->r[EZHLE_FDS_REG_Y] = 0u;
+        return EZHLE_ERR_FAULT;
+    }
+    for (unsigned i = 1u; i <= 4u; i++) {
+        if (disk_id[i] != 0xFFu && disk_id[i] != info_id[i]) {
+            ezhle_set_error(core, "LoadFiles: wrong game name/type");
+            fds_log(core, "LoadFiles: wrong game name/type");
+            regs->r[EZHLE_FDS_REG_A] = 0x05u;
+            regs->r[EZHLE_FDS_REG_Y] = 0u;
+            return EZHLE_ERR_FAULT;
+        }
+    }
+    if (disk_id[5] != 0xFFu && disk_id[5] != info_id[5]) {
+        ezhle_set_error(core, "LoadFiles: wrong game version");
+        fds_log(core, "LoadFiles: wrong game version");
+        regs->r[EZHLE_FDS_REG_A] = 0x06u;
+        regs->r[EZHLE_FDS_REG_Y] = 0u;
+        return EZHLE_ERR_FAULT;
+    }
+    if (disk_id[6] != 0xFFu && disk_id[6] != info_id[6]) {
+        ezhle_set_error(core, "LoadFiles: wrong side number");
+        fds_log(core, "LoadFiles: wrong side number");
+        regs->r[EZHLE_FDS_REG_A] = 0x07u;
+        regs->r[EZHLE_FDS_REG_Y] = 0u;
+        return EZHLE_ERR_FAULT;
+    }
+    if (disk_id[7] != 0xFFu && disk_id[7] != info_id[7]) {
+        ezhle_set_error(core, "LoadFiles: wrong disk number");
+        fds_log(core, "LoadFiles: wrong disk number");
+        regs->r[EZHLE_FDS_REG_A] = 0x08u;
+        regs->r[EZHLE_FDS_REG_Y] = 0u;
+        return EZHLE_ERR_FAULT;
+    }
+    if (disk_id[8] != 0xFFu && disk_id[8] != info_id[8]) {
+        ezhle_set_error(core, "LoadFiles: wrong disk type");
+        fds_log(core, "LoadFiles: wrong disk type");
+        regs->r[EZHLE_FDS_REG_A] = 0x09u;
+        regs->r[EZHLE_FDS_REG_Y] = 0u;
+        return EZHLE_ERR_FAULT;
+    }
+    if (disk_id[9] != 0xFFu && disk_id[9] != info_id[9]) {
+        ezhle_set_error(core, "LoadFiles: wrong unknown field");
+        fds_log(core, "LoadFiles: wrong unknown field");
+        regs->r[EZHLE_FDS_REG_A] = 0x10u;
+        regs->r[EZHLE_FDS_REG_Y] = 0u;
+        return EZHLE_ERR_FAULT;
+    }
+
+    first_count = ezhle_fds_image_first_side_file_count(disk);
+    if (first_count > ezhle_fds_image_file_count(disk)) {
+        first_count = ezhle_fds_image_file_count(disk);
+    }
+
+    /* Missing file detection for explicit lists. */
+    if (!empty_list) {
+        for (size_t k = 0u; k < list_count; k++) {
+            int found = 0;
+            for (size_t i = 0u; i < first_count; i++) {
+                const ezhle_fds_image_file *f = ezhle_fds_image_file_at(disk, i);
+                if (f != NULL && f->id == list_ids[k]) {
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found) {
+                ezhle_set_error(core, "LoadFiles: could not load all files");
+                fds_log(core, "LoadFiles: could not load all files");
+                regs->r[EZHLE_FDS_REG_A] = 0x40u;
+                regs->r[EZHLE_FDS_REG_Y] = 0u;
+                return EZHLE_ERR_FAULT;
+            }
+        }
+    }
+
+    /* Two-attempt retry wrapper. */
+    for (attempt = 0u; attempt < 2u; attempt++) {
+        loaded = 0u;
+        int failed = 0;
+        for (size_t i = 0u; i < first_count; i++) {
+            const ezhle_fds_image_file *f = ezhle_fds_image_file_at(disk, i);
+            int match = 0;
+            if (f == NULL) {
+                continue;
+            }
+            if (empty_list) {
+                if (f->id <= ezhle_fds_image_boot_read_code(disk)) {
+                    match = 1;
+                }
+            } else {
+                for (size_t k = 0u; k < list_count; k++) {
+                    if (list_ids[k] == f->id) {
+                        match = 1;
+                        break;
+                    }
+                }
+            }
+            if (!match) {
+                continue;
+            }
+
+            loaded++;
+            if (!fds_load_files_is_dummy(f->address, f->size)) {
+                const uint8_t *data = ezhle_fds_image_file_data(disk, f);
+                if (data == NULL) {
+                    failed = 1;
+                    break;
+                }
+                for (uint16_t s = 0u; s < f->size; s++) {
+                    uint16_t addr = (uint16_t)((uint32_t)f->address + s);
+                    if (fds_write8(core, addr, data[s]) != EZHLE_OK) {
+                        failed = 1;
+                        break;
+                    }
+                }
+                if (failed) {
+                    break;
+                }
+            }
+        }
+
+        if (!failed) {
+            regs->r[EZHLE_FDS_REG_Y] = (uint32_t)loaded;
+            regs->r[EZHLE_FDS_REG_A] = 0u;
+            (void)snprintf(msg, sizeof(msg), "LoadFiles: loaded %u files", (unsigned)loaded);
+            fds_log(core, msg);
+            return 0;
+        }
+    }
+
+    ezhle_set_error(core, "LoadFiles: write fault");
+    fds_log(core, "LoadFiles: write fault");
+    regs->r[EZHLE_FDS_REG_A] = 0xFFu;
+    regs->r[EZHLE_FDS_REG_Y] = 0u;
+    return EZHLE_ERR_FAULT;
+}
 
 static const ezhle_fds_entry_t FDS_ENTRIES[] = {
     { 0xE149u, "Delay131", 1 },
@@ -243,7 +572,7 @@ static const ezhle_fds_entry_t FDS_ENTRIES[] = {
     { 0xE1CEu, "DiskTransfer", 0 },
     { 0xE1D9u, "DiskSkipBytes", 0 },
     { 0xE1EFu, "AcknowledgeDelay", 0 },
-    { 0xE1F8u, "LoadFiles", 0 },
+    { 0xE1F8u, "LoadFiles", 1 },
     { 0xE237u, "AppendFile", 0 },
     { 0xE239u, "WriteFile", 0 },
     { 0xE2B7u, "CheckFileCount", 0 },
@@ -364,6 +693,9 @@ static int fds_dispatch(ezhle_core_t *core, ezhle_regs_t *regs)
         case 0xE492u:
             ret = fds_set_num_files(core, regs);
             break;
+        case 0xE1F8u:
+            ret = fds_load_files(core, regs);
+            break;
         default:
             ret = EZHLE_ERR_UNIMPL;
             break;
@@ -393,7 +725,9 @@ static int fds_dispatch(ezhle_core_t *core, ezhle_regs_t *regs)
                        info->name, entry);
         ezhle_set_error(core, "%s", msg);
         fds_log(core, msg);
-        regs->r[EZHLE_FDS_REG_A] = (uint32_t)(uint8_t)ret;
+        if (entry != 0xE1F8u) {
+            regs->r[EZHLE_FDS_REG_A] = (uint32_t)(uint8_t)ret;
+        }
         return ret;
     }
 
