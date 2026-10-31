@@ -629,6 +629,100 @@ uint16_t ezhle_fds_reset_vector(ezhle_core_t *core)
     return fds_read16(core, EZHLE_FDS_RESET_VECTOR_ADDR);
 }
 
+uint8_t ezhle_fds_nmi_control(ezhle_core_t *core)
+{
+    uint8_t v = 0u;
+    if (core == NULL) {
+        return 0u;
+    }
+    if (fds_read8(core, EZHLE_FDS_NMI_CONTROL_ADDR, &v) != EZHLE_OK) {
+        return 0u;
+    }
+    return v;
+}
+
+uint8_t ezhle_fds_irq_control(ezhle_core_t *core)
+{
+    uint8_t v = 0u;
+    if (core == NULL) {
+        return 0u;
+    }
+    if (fds_read8(core, EZHLE_FDS_IRQ_CONTROL_ADDR, &v) != EZHLE_OK) {
+        return 0u;
+    }
+    return v;
+}
+
+uint16_t ezhle_fds_nmi_vector(ezhle_core_t *core)
+{
+    uint8_t ctrl;
+    uint16_t game_addr;
+
+    if (core == NULL) {
+        return 0u;
+    }
+    ctrl = ezhle_fds_nmi_control(core);
+    switch (ctrl >> 6) {
+    case 0:
+        return EZHLE_FDS_VINTWAIT_HANDLER_ADDR;
+    case 1:
+        game_addr = fds_read16(core, EZHLE_FDS_GAME_NMI_VECTOR_1_ADDR);
+        return game_addr;
+    case 2:
+        game_addr = fds_read16(core, EZHLE_FDS_GAME_NMI_VECTOR_2_ADDR);
+        return game_addr;
+    default:
+        game_addr = fds_read16(core, EZHLE_FDS_GAME_NMI_VECTOR_3_ADDR);
+        return game_addr;
+    }
+}
+
+uint16_t ezhle_fds_irq_vector(ezhle_core_t *core)
+{
+    uint8_t ctrl;
+
+    if (core == NULL) {
+        return 0u;
+    }
+    ctrl = ezhle_fds_irq_control(core);
+    switch (ctrl >> 6) {
+    case 0:
+        return EZHLE_FDS_DISK_SKIP_BYTES_ADDR;
+    case 1:
+        return EZHLE_FDS_DISK_TRANSFER_ADDR;
+    case 2:
+        return EZHLE_FDS_ACKNOWLEDGE_DELAY_ADDR;
+    default:
+        return fds_read16(core, EZHLE_FDS_GAME_IRQ_VECTOR_ADDR);
+    }
+}
+
+uint16_t ezhle_fds_nmi_cpu_vector(ezhle_core_t *core)
+{
+    if (core == NULL) {
+        return 0u;
+    }
+    return fds_read16(core, EZHLE_FDS_NMI_CPU_VECTOR_ADDR);
+}
+
+uint16_t ezhle_fds_irq_cpu_vector(ezhle_core_t *core)
+{
+    if (core == NULL) {
+        return 0u;
+    }
+    return fds_read16(core, EZHLE_FDS_IRQ_CPU_VECTOR_ADDR);
+}
+
+/* Aliases. */
+uint16_t ezhle_fds_nmi_target(ezhle_core_t *core) { return ezhle_fds_nmi_vector(core); }
+uint16_t ezhle_fds_irq_target(ezhle_core_t *core) { return ezhle_fds_irq_vector(core); }
+uint16_t ezhle_fds_nmi_handler(ezhle_core_t *core) { return ezhle_fds_nmi_vector(core); }
+uint16_t ezhle_fds_irq_handler(ezhle_core_t *core) { return ezhle_fds_irq_vector(core); }
+uint16_t ezhle_fds_nmi_dispatch(ezhle_core_t *core) { return ezhle_fds_nmi_vector(core); }
+uint16_t ezhle_fds_irq_dispatch(ezhle_core_t *core) { return ezhle_fds_irq_vector(core); }
+uint16_t ezhle_fds_resolve_nmi(ezhle_core_t *core) { return ezhle_fds_nmi_vector(core); }
+uint16_t ezhle_fds_resolve_irq(ezhle_core_t *core) { return ezhle_fds_irq_vector(core); }
+
 int ezhle_fds_call(ezhle_core_t *core, ezhle_regs_t *regs, uint16_t entry)
 {
     if (core == NULL) {
