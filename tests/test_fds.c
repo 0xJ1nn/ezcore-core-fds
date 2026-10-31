@@ -387,6 +387,89 @@ static int test_reset_vector_live(void)
     return 0;
 }
 
+static int test_nmi_irq_vectors(void)
+{
+    fds_fake_bus_t fake;
+    ezhle_bus_t bus;
+    ezhle_desc_t desc;
+    ezhle_core_t *core;
+    uint16_t v;
+
+    memset(&fake, 0, sizeof(fake));
+    memset(&bus, 0, sizeof(bus));
+    bus.read32 = fds_fake_read32;
+    bus.write32 = fds_fake_write32;
+    bus.read_bytes = fds_fake_read_bytes;
+    bus.log = fds_fake_log;
+    bus.trace = fds_fake_trace;
+    bus.ctx = &fake;
+    EZHLE_DESC_INIT(&desc, "fds", "test", &bus);
+
+    /* game + cpu vectors */
+    fake.mem[0xDFF6] = 0x34; fake.mem[0xDFF7] = 0x12;
+    fake.mem[0xDFF8] = 0x78; fake.mem[0xDFF9] = 0x56;
+    fake.mem[0xDFFA] = 0xBC; fake.mem[0xDFFB] = 0x9A;
+    fake.mem[0xDFFE] = 0xF0; fake.mem[0xDFFF] = 0xDE;
+    fake.mem[0xFFFA] = 0x68; fake.mem[0xFFFB] = 0x24;
+    fake.mem[0xFFFE] = 0xE0; fake.mem[0xFFFF] = 0xAC;
+
+    core = ezhle_create(&desc);
+    if (core == NULL) return 1;
+
+    /* null guards */
+    if (ezhle_fds_nmi_control(NULL) != 0u) { ezhle_destroy(core); return 1; }
+    if (ezhle_fds_irq_control(NULL) != 0u) { ezhle_destroy(core); return 1; }
+    if (ezhle_fds_nmi_vector(NULL) != 0u) { ezhle_destroy(core); return 1; }
+    if (ezhle_fds_irq_vector(NULL) != 0u) { ezhle_destroy(core); return 1; }
+    if (ezhle_fds_nmi_cpu_vector(NULL) != 0u) { ezhle_destroy(core); return 1; }
+    if (ezhle_fds_irq_cpu_vector(NULL) != 0u) { ezhle_destroy(core); return 1; }
+
+    /* NMI cases */
+    fake.mem[0x0100] = 0x00;
+    if (ezhle_fds_nmi_control(core) != 0x00u) { ezhle_destroy(core); return 1; }
+    if (ezhle_fds_nmi_vector(core) != 0xE19Du) { printf("  nmi case0 got %04x\\n", ezhle_fds_nmi_vector(core)); ezhle_destroy(core); return 1; }
+    if (ezhle_fds_nmi_target(core) != 0xE19Du || ezhle_fds_nmi_handler(core) != 0xE19Du ||
+        ezhle_fds_nmi_dispatch(core) != 0xE19Du || ezhle_fds_resolve_nmi(core) != 0xE19Du) { ezhle_destroy(core); return 1; }
+
+    fake.mem[0x0100] = 0x40;
+    if (ezhle_fds_nmi_vector(core) != 0x1234u) { printf("  nmi case1 got %04x\\n", ezhle_fds_nmi_vector(core)); ezhle_destroy(core); return 1; }
+
+    fake.mem[0x0100] = 0x80;
+    if (ezhle_fds_nmi_vector(core) != 0x5678u) { printf("  nmi case2 got %04x\\n", ezhle_fds_nmi_vector(core)); ezhle_destroy(core); return 1; }
+
+    fake.mem[0x0100] = 0xC0;
+    if (ezhle_fds_nmi_vector(core) != 0x9ABCu) { printf("  nmi case3 got %04x\\n", ezhle_fds_nmi_vector(core)); ezhle_destroy(core); return 1; }
+
+    /* IRQ cases */
+    fake.mem[0x0101] = 0x00;
+    if (ezhle_fds_irq_control(core) != 0x00u) { ezhle_destroy(core); return 1; }
+    if (ezhle_fds_irq_vector(core) != 0xE1D9u) { printf("  irq case0 got %04x\\n", ezhle_fds_irq_vector(core)); ezhle_destroy(core); return 1; }
+
+    fake.mem[0x0101] = 0x40;
+    if (ezhle_fds_irq_vector(core) != 0xE1CEu) { printf("  irq case1 got %04x\\n", ezhle_fds_irq_vector(core)); ezhle_destroy(core); return 1; }
+
+    fake.mem[0x0101] = 0x80;
+    if (ezhle_fds_irq_vector(core) != 0xE1EFu) { printf("  irq case2 got %04x\\n", ezhle_fds_irq_vector(core)); ezhle_destroy(core); return 1; }
+
+    fake.mem[0x0101] = 0xC0;
+    if (ezhle_fds_irq_vector(core) != 0xDEF0u) { printf("  irq case3 got %04x\\n", ezhle_fds_irq_vector(core)); ezhle_destroy(core); return 1; }
+
+    /* cpu vectors */
+    v = ezhle_fds_nmi_cpu_vector(core);
+    if (v != 0x2468u) { printf("  nmi cpu vector got %04x\\n", v); ezhle_destroy(core); return 1; }
+    v = ezhle_fds_irq_cpu_vector(core);
+    if (v != 0xACE0u) { printf("  irq cpu vector got %04x\\n", v); ezhle_destroy(core); return 1; }
+
+    /* irq aliases */
+    if (ezhle_fds_irq_target(core) != ezhle_fds_irq_vector(core) ||
+        ezhle_fds_irq_handler(core) != ezhle_fds_irq_vector(core) ||
+        ezhle_fds_irq_dispatch(core) != ezhle_fds_irq_vector(core) ||
+        ezhle_fds_resolve_irq(core) != ezhle_fds_irq_vector(core)) { ezhle_destroy(core); return 1; }
+
+    ezhle_destroy(core);
+    return 0;
+}
+
 static int test_errprop_read(void)
 {
     fds_fake_bus_t fake;
@@ -1195,6 +1278,7 @@ int main(void)
     failed += run("null_guards", test_null_guards);
     failed += run("double_attach", test_double_attach);
     failed += run("reset_vector_live", test_reset_vector_live);
+    failed += run("nmi_irq_vectors", test_nmi_irq_vectors);
     failed += run("errprop_read", test_errprop_read);
     failed += run("errprop_write", test_errprop_write);
     failed += run("range_nam2pixel", test_range_nam2pixel);
